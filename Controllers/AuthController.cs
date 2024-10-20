@@ -52,8 +52,11 @@ namespace Auth.Controllers
                 {
                     user= await _userManager.FindByNameAsync(loginmodel.Username);
                 }
+
                 Boolean test = await _userManager.CheckPasswordAsync(user, loginmodel.Password);
-                if (user != null && await _userManager.CheckPasswordAsync(user, loginmodel.Password)) {
+
+                if (user != null && await _userManager.CheckPasswordAsync(user, loginmodel.Password)) 
+                {
 
                     var userRoles = await _userManager.GetRolesAsync(user);
                     var AuthClaims = new List<Claim>
@@ -139,5 +142,83 @@ namespace Auth.Controllers
                 return StatusCode(500, ex.Message);
             }
         }
+
+
+        [HttpPut("update-user")]
+        [Authorize] // Only authorized users can update their details
+        public async Task<IActionResult> UpdateUser([FromBody] UpdateUserDto model)
+        {
+            // Get the currently authenticated user
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null) return NotFound("User not found");
+
+            // Check if email needs to be updated
+            if (!string.IsNullOrEmpty(model.Email) && model.Email != user.Email)
+            {
+                var emailExists = await _userManager.FindByEmailAsync(model.Email);
+                if (emailExists != null) return BadRequest("Email is already taken");
+
+                user.Email = model.Email;
+                user.UserName = model.Email;
+            }
+
+            // Check if password update is requested
+            if (!string.IsNullOrEmpty(model.CurrentPassword) && !string.IsNullOrEmpty(model.NewPassword))
+            {
+                if (model.NewPassword != model.ConfirmPassword)
+                {
+                    return BadRequest("New password and confirm password do not match.");
+                }
+
+                var passwordChangeResult = await _userManager.ChangePasswordAsync(user, model.CurrentPassword, model.NewPassword);
+                if (!passwordChangeResult.Succeeded)
+                {
+                    return BadRequest(passwordChangeResult.Errors);
+                }
+            }
+
+            var result = await _userManager.UpdateAsync(user);
+
+            if (result.Succeeded)
+            {
+                return Ok("User updated successfully.");
+            }
+
+            return BadRequest(result.Errors);
+        }
+
+
+        [HttpPost]
+        [Route("refresh")]
+        public async Task<ActionResult> Refresh(TokenApiModel tokenApiModel)
+        {
+            if (tokenApiModel is null)
+                return BadRequest("Invalid client request");
+
+            string accessToken = tokenApiModel.AccessToken;
+            string refreshToken = tokenApiModel.RefreshToken;
+
+            var principal = _tokenService.GetPrincipalFromExpiredToken(accessToken);
+            var username = principal.Identity.Name;//this is mapped to the Name claim by default
+
+            var user = await _userManager.FindByNameAsync(username);
+
+            if (user is null || user.RefreshToken != refreshToken || user.RefreshTokenExpiryTime <= DateTime.Now)
+                return BadRequest("Invalid client request");
+
+            var newAccessToken = _tokenService.GenerateAccessToken(principal.Claims);
+            var newRefreshToken = _tokenService.GenerateRefreshToken();
+
+            user.RefreshToken = newRefreshToken;
+            await _userManager.UpdateAsync(user);
+
+            return Ok(new AuthenticatedResponse()
+            {
+                Token = newAccessToken,
+                RefreshToken = newRefreshToken
+            });
+        }
+
     }
 }

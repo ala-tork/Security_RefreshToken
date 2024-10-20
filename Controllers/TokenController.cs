@@ -32,7 +32,7 @@ namespace RefreshToken.Controllers
             string refreshToken = tokenApiModel.RefreshToken;
 
             var principal = _tokenService.GetPrincipalFromExpiredToken(accessToken);
-            var username = principal.Identity.Name; //this is mapped to the Name claim by default
+            var username = principal.Identity.Name;//this is mapped to the Name claim by default
 
             var user = await _userContext.FindByNameAsync(username);
 
